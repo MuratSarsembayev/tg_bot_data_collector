@@ -3,6 +3,7 @@ from aiogram.types import Message
 from aiogram.dispatcher import FSMContext
 from main import dp, bot
 from states import Data_collector_states
+from datetime import datetime, date
 import eventlog
 import tg_bot_database
 import keyboard
@@ -27,7 +28,7 @@ async def customer_number_input(message: Message, state: FSMContext):
     chat_id = message.chat.id
     username_tg = message.from_user.username
     if customer_number.isdigit() and len(customer_number) == 11 and customer_number[0] == '7':
-        message_date = message.date
+        message_date = message.date.date()
         customer_number_data = (customer_number, message_date, username_tg)
         await tg_bot_database.insert_to_customer_number_table(*customer_number_data)
         result = await eventlog.select_data_from_eventlog_database(customer_number)
@@ -43,6 +44,7 @@ async def customer_number_input(message: Message, state: FSMContext):
 Введите команду /input_number, а затем верный номер"""
         await bot.delete_message(chat_id, message_id)
         await message.answer(text=text, reply_markup=keyboard.user_keyboard)
+        await Data_collector_states.waiting_for_customer_number.set()
 
 
 

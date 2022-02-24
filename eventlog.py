@@ -40,7 +40,7 @@ async def scheduled_get_data_from_eventlog(customer_numbers):
         """
 
     select_data_query = """SELECT customer_number FROM event_log_database.eventlog WHERE customer_number = $1 AND 
-        last_seen_in_superapp >= $2::timestamp AND last_seen_in_superapp <= $3::timestamp  ORDER BY 
+        last_seen_in_superapp >= $2::date AND last_seen_in_superapp <= $3::date  ORDER BY 
         last_seen_in_superapp DESC; """
     async with eventlog_database.pool.acquire() as connect:
         async with connect.transaction():

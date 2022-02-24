@@ -48,7 +48,7 @@ async def user_tg_data_update(username_tg, chat_id, user_id):
 
         """
 
-    query = """UPDATE tg_bot_database.users SET chat_id = $1, user_id = $2 WHERE username_tg = $3 ;"""
+    query = """UPDATE tg_bot_database.users SET tg_chat_id = $1, tg_user_id = $2 WHERE username_tg = $3 ;"""
     async with tg_bot_database.pool.acquire() as connect:
         async with connect.transaction():
             await connect.execute(query, chat_id, user_id, username_tg)
@@ -137,14 +137,13 @@ async def insert_to_customer_number_table(customer_number, date, username_tg):
         """
 
     insert_to_database_query = """INSERT INTO tg_bot_database.customer_numbers (customer_number, office, 
-                    date,user_fullname, city) VALUES ($1,$2,$3,$4,$5); """
+                    date,user_fullname, city) VALUES ($1,$2,$3,$4,$5) ON CONFLICT ON CONSTRAINT unique_number DO NOTHING; """
     select_user_data_from_database = """SELECT full_name, office, city FROM tg_bot_database.users WHERE 
             username_tg = $1; """
     async with tg_bot_database.pool.acquire() as connect:
         async with connect.transaction():
             user_data = await connect.fetchrow(select_user_data_from_database, username_tg)
-            await connect.execute(insert_to_database_query, customer_number, user_data['office'], date,
-                                  user_data['full_name'], user_data['city'])
+            await connect.execute(insert_to_database_query, customer_number, user_data['office'], date, user_data['full_name'], user_data['city'])
 
 
 async def update_90_days_status_customer_number_table(customer_number, message_date, result):
@@ -248,9 +247,8 @@ async def manager_query(operator, employee_name, manager_username, employee_user
             manager_data = await connect.fetchrow(get_manager_data, manager_username)
             if operator == "INSERT":
                 query = """INSERT INTO tg_bot_database.users (username_tg, full_name, office, rights, 
-                        city) VALUES ($1, $2, $3, $4, $5); """
-                await connect.execute(query, employee_username, employee_name, manager_data['office'], 'Worker',
-                                      manager_data['city'])
+                        city) VALUES ($1, $2, $3, $4, $5) ON CONFLICT ON CONSTRAINT unique_user DO NOTHING; """
+                await connect.execute(query, employee_username, employee_name, manager_data['office'], 'Worker', manager_data['city'])
             else:
                 query = """DELETE FROM tg_bot_database.users WHERE full_name = $1 AND office = $2 AND city = 
                         $3 AND rights = 'Worker'; """
@@ -278,13 +276,13 @@ async def admin_store_query(operator, city, name):
     async with tg_bot_database.pool.acquire() as connect:
         async with connect.transaction():
             if operator == "INSERT":
-                query = """INSERT INTO tg_bot_database.stores (city, store) VALUES ($1, $2) ON CONFLICT (city, 
-                    store) DO NOTHING; """
+                query = """INSERT INTO tg_bot_database.stores (city, store) VALUES ($1, $2) ON CONFLICT ON CONSTRAINT 
+                city_store DO NOTHING; """
                 await connect.execute(query, city, name)
             else:
                 store_query = """DELETE FROM tg_bot_database.stores WHERE store = $1; """  # удаление самого магазин
                 await connect.execute(store_query, name)
-                users_query = """DELETE FROM tg_bot_database.users WHERE store = $1;"""  # удаление всех работников этого магазина
+                users_query = """DELETE FROM tg_bot_database.users WHERE office = $1;"""  # удаление всех работников этого магазина
                 await connect.execute(users_query, name)
 
 
@@ -294,32 +292,29 @@ async def admin_manager_query(operator, city, office, name, username=None):
 
         Возвращает:
 
-        result - string. Либо "Done", либо chat_id пользователя, которому дали статус менеджера
+        result - string. chat_id
 
         """
 
     async with tg_bot_database.pool.acquire() as connect:
         async with connect.transaction():
-            data_query = """SELECT full_name, rights, city, office, tg_chat_id, tg_user_id FROM tg_bot_database.users WHERE username = $1 
-                AND rights = $2; """
-            data = await connect.fetchrow(data_query, username, "Worker")
             if operator == "INSERT":
-                if data["rights"] == 'Worker':
-                    query = """UPDATE tg_bot_database.users SET rights = 'Manager' WHERE full_name = $1 AND city 
-                        = $2 AND office = $3; """
-                    await connect.execute(query, name, city, office)
-                    result = data["tg_chat_id"]
+                query = """INSERT INTO tg_bot_database.users (username_tg, full_name, office, rights, city) VALUES (
+                $1, $2, $3, $4, $5) ON CONFLICT ON CONSTRAINT unique_user DO UPDATE SET rights = $4 RETURNING 
+                tg_chat_id; """
+                chat_id = await connect.fetchrow(query, username, name, office, 'Manager', city)
+                if chat_id['tg_chat_id'] != 'not set':
+                    result = int(chat_id["tg_chat_id"])
                 else:
-                    query = """INSERT INTO tg_bot_database.users (username_tg, full_name, office, rights, 
-                        city) VALUES ($1, $2, $3, $4, $5); """
-                    await connect.execute(query, username, name, office, 'Manager',
-                                          city)
-                    result = "Done"
+                    result = 'not set'
             else:
                 query = """DELETE FROM tg_bot_database.users WHERE full_name = $1 AND office = $2 AND city = $3 
-                        AND rights = 'Manager'; """
-                await connect.execute(query, name, office, city)
-                result = "Done"
+                        AND rights = 'Manager' RETURNING tg_chat_id; """
+                chat_id = await connect.fetchrow(query, name, office, city)
+                if chat_id['tg_chat_id'] != 'not set':
+                    result = int(chat_id["tg_chat_id"])
+                else:
+                    result = 'not set'
 
     return result
 
@@ -330,32 +325,29 @@ async def admin_worker_query(operator, city, office, name, username=None):
 
         Возвращает:
 
-        result - string. Либо "Done", либо chat_id работника, статус которого изменили с Manager на Worker
+        result - result - string. chat_id
 
         """
 
     async with tg_bot_database.pool.acquire() as connect:
         async with connect.transaction():
-            data_query = """SELECT full_name, rights, city, tg_user_id, tg_chat_id office FROM tg_bot_database.users WHERE username = $1 
-                                AND rights = $2; """
-            data = await connect.fetchrow(data_query, username, "Manager")
             if operator == "INSERT":
-                if data["rights"] == "Manager":
-                    query = """UPDATE tg_bot_database.users SET rights = 'Worker' WHERE full_name = $1 AND city 
-                                                = $2 AND office = $3; """
-                    await connect.execute(query, name, city, office)
-                    result = data["tg_chat_id"]
+                query = """INSERT INTO tg_bot_database.users (username_tg, full_name, office, rights, city) VALUES (
+                $1, $2, $3, $4, $5) ON CONFLICT ON CONSTRAINT unique_user DO UPDATE SET rights 
+                = 'Worker' RETURNING tg_chat_id; """
+                chat_id = await connect.fetchrow(query, username, name, office, 'Worker', city)
+                if chat_id['tg_chat_id'] != 'not set':
+                    result = int(chat_id["tg_chat_id"])
                 else:
-                    query = """INSERT INTO tg_bot_database.users (username_tg, full_name, office, rights, 
-                        city) VALUES ($1, $2, $3, $4, $5); """
-                    await connect.execute(query, username, name, office, 'Worker',
-                                          city)
-                    result = "Done"
+                    result = 'not set'
             else:
                 query = """DELETE FROM tg_bot_database.users WHERE full_name = $1 AND office = $2 AND city = $3 
-                        AND rights = 'Worker'; """
-                await connect.execute(query, name, office, city)
-                result = "Done"
+                                        AND rights = 'Worker' RETURNING tg_chat_id; """
+                chat_id = await connect.fetchrow(query, name, office, city)
+                if chat_id['tg_chat_id'] != 'not set':
+                    result = int(chat_id["tg_chat_id"])
+                else:
+                    result = 'not set'
 
     return result
 
@@ -374,21 +366,32 @@ async def super_admin_query(operator, username):
 
         Возвращает:
 
-        None
+        result - string. chat_id
 
         """
 
     async with tg_bot_database.pool.acquire() as connect:
         async with connect.transaction():
-            check_if_exists = """SELECT EXISTS(SELECT * FROM tg_bot_database.users WHERE username = $1);"""
+            check_if_exists = """SELECT EXISTS(SELECT * FROM tg_bot_database.users WHERE username_tg = $1);"""
             exists = await connect.fetchrow(check_if_exists, username)
             if exists:
                 if operator == "UPDATE":
-                    query = """UPDATE tg_bot_database.users SET rights = 'Admin' WHERE username = $1;"""
-                    await connect.execute(query, username)
+                    query = """UPDATE tg_bot_database.users SET rights = 'Admin' WHERE username_tg = $1 RETURNING 
+                    tg_chat_id; """
+                    chat_id = await connect.fetchrow(query, username)
+                    if chat_id['tg_chat_id'] != 'not set':
+                        result = int(chat_id["tg_chat_id"])
+                    else:
+                        result = 'not set'
                 elif operator == "DELETE":
-                    query = """DELETE FROM tg_bot_database.users WHERE username = $1 AND rights = 'Admin';"""
-                    await connect.execute(query, username)
+                    query = """DELETE FROM tg_bot_database.users WHERE username_tg = $1 AND rights = 'Admin' RETURNING 
+                    tg_chat_id; """
+                    chat_id = await connect.fetchrow(query, username)
+                    if chat_id['tg_chat_id'] != 'not set':
+                        result = int(chat_id["tg_chat_id"])
+                    else:
+                        result = 'not set'
+    return result
 
 
 # ----------------------------------------------------------------------------

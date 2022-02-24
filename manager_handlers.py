@@ -25,7 +25,7 @@ async def input_new_username(message: Message, state: FSMContext):
     await tg_bot_database.log(message.from_user.username, message.date, message.text)
     new_name = message.text
     await state.update_data(employee_name=new_name)
-    text = """Введите username сотрудника.
+    text = """Введите Telegram username сотрудника.
 USERNAME нужно ввести без @! 
 """
 
@@ -37,7 +37,7 @@ USERNAME нужно ввести без @!
 async def add_employee(message: Message, state: FSMContext):
     await tg_bot_database.log(message.from_user.username, message.date, message.text)
     data = await state.get_data()
-    employee_username = message.text.lower()
+    employee_username = message.text
     employee_name = data.get("employee_name")
     manager_username = message.from_user.username
     await tg_bot_database.manager_query("INSERT", employee_name, manager_username, employee_username=employee_username)
@@ -59,8 +59,7 @@ async def delete_name(message: Message):
     user_data = await tg_bot_database.check_if_registered(message.from_user.username)
     if user_data:
         text = """Вы удаляете сотрудника из базы.
-Введите имя сотрудника в формате IVAN.IVANOV
-Имя и фамилия заглавными латинскими буквами и через точку (.)."""
+Выберите имя сотрудника."""
         employee_list = await keyboard.users_list(user_data['city'], user_data['office'], 'Worker')
         await message.answer(text=text, reply_markup=employee_list)
         await Data_collector_states.manager_delete_employee.set()
@@ -103,7 +102,7 @@ async def customer_number_input(message: Message, state: FSMContext):
     chat_id = message.chat.id
     username_tg = message.from_user.username
     if customer_number.isdigit() and len(customer_number) == 11 and customer_number[0] == '7':
-        message_date = message.date
+        message_date = message.date.date()
         customer_number_data = (customer_number, message_date, username_tg)
         await tg_bot_database.insert_to_customer_number_table(*customer_number_data)
         result = await eventlog.select_data_from_eventlog_database(customer_number)
